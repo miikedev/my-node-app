@@ -1,0 +1,57 @@
+name: Deploy to EC2 on Production Merge
+
+on:
+  push:
+    branches: [ production ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to EC2 via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_KEY }}
+        port: ${{ secrets.EC2_PORT }}
+        script: |
+          # Update and install Git if missing
+          if ! command -v git &> /dev/null; then
+            echo "Git not found. Installing..."
+            sudo apt-get update -y || sudo yum update -y
+            sudo apt-get install git -y || sudo yum install git -y
+          else
+            echo "Git is already installed"
+          fi
+
+          # Install Docker if not installed
+          if ! command -v docker &> /dev/null; then
+            echo "Docker not found. Installing..."
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            sh get-docker.sh
+            sudo usermod -aG docker $USER
+          else
+            echo "Docker is already installed"
+          fi
+
+          # Clone or update the repo
+          cd ~
+          if [ -d "my-node-app" ]; then
+            cd my-node-app && git pull origin production
+          else
+            git clone git@github.com:miikedev/my-node-app.git my-node-app
+            cd my-node-app
+          fi
+
+          # Stop old container
+          docker stop node-app || true
+          docker rm node-app || true
+
+          # Rebuild and run
+          docker build -t node-app .
+          docker run -d --restart=always -p 3000:3000 --name node-app node-app
